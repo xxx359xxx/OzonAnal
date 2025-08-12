@@ -539,7 +539,7 @@ class EnhancedOrderAnalyzer:
                 
                 for _, row in monthly_analysis.iterrows():
                     monthly_data.append([
-                        row['month_year'],
+                        row['month'],
                         int(row['orders_count']),
                         f"{row['total_revenue']:.2f}",
                         f"{row['avg_order_value']:.2f}",
@@ -560,7 +560,7 @@ class EnhancedOrderAnalyzer:
                 
                 for _, row in monthly_analysis.iterrows():
                     monthly_data.append([
-                        row['month_year'],
+                        row['month'],
                         int(row['orders_count']),
                         f"{row['total_revenue']:.2f}",
                         f"{row['avg_order_value']:.2f}",
