@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
-import random
 from io import BytesIO
 from reportlab.lib.pagesizes import A4, letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
@@ -188,8 +187,11 @@ class OrderAnalyzer:
         return self.df.groupby('Наименование товара')['Количество'].sum().sort_values(ascending=False).head(n)
     
     def get_top_products_by_revenue(self, n=10):
-        """Топ товаров по выручке"""
-        return self.df.groupby('Наименование товара')['Сумма отправления'].sum().sort_values(ascending=False).head(n)
+        """Топ товаров по выручке (только доставленные заказы)"""
+        delivered_df = self.df[self.df['Статус'] == 'Доставлен']
+        if len(delivered_df) == 0:
+            return pd.Series(dtype=float)
+        return delivered_df.groupby('Наименование товара')['Сумма отправления'].sum().sort_values(ascending=False).head(n)
     
     def get_status_distribution(self):
         """Распределение статусов заказов"""
@@ -641,109 +643,3 @@ class OrderAnalyzer:
         wb.save(buffer)
         buffer.seek(0)
         return buffer
-
-def generate_mock_data(n_orders=100):
-    """Генерация тестовых данных для демонстрации"""
-    
-    # Списки для генерации случайных данных
-    products = [
-        'Смартфон Samsung Galaxy', 'iPhone 15 Pro', 'Наушники Sony WH-1000XM4',
-        'Ноутбук ASUS VivoBook', 'Планшет iPad Air', 'Умные часы Apple Watch',
-        'Телевизор LG OLED', 'Кофемашина Delonghi', 'Пылесос Dyson V15',
-        'Микроволновка Panasonic', 'Холодильник Samsung', 'Стиральная машина Bosch',
-        'Фен Dyson Supersonic', 'Электробритва Philips', 'Зубная щетка Oral-B',
-        'Фитнес-браслет Xiaomi', 'Колонка JBL Charge', 'Клавиатура Logitech',
-        'Мышь Razer DeathAdder', 'Монитор Dell UltraSharp', 'Принтер HP LaserJet',
-        'Роутер ASUS AX6000', 'Веб-камера Logitech C920', 'Микрофон Blue Yeti',
-        'Игровая консоль PlayStation 5', 'Контроллер Xbox', 'Игра Cyberpunk 2077',
-        'Книга "Python для начинающих"', 'Настольная лампа Xiaomi', 'Рюкзак Nike'
-    ]
-    
-    statuses = ['Доставлен', 'В пути', 'Отменен', 'Возвращен', 'Обрабатывается']
-    status_weights = [0.7, 0.15, 0.05, 0.03, 0.07]  # Вероятности статусов
-    
-    data = []
-    
-    for i in range(n_orders):
-        # Базовые данные заказа
-        order_id = f"ORD{i+1:05d}"
-        shipment_id = f"SHIP{i+1:05d}"
-        ozon_id = f"OZ{random.randint(100000, 999999)}"
-        
-        # Случайные даты (используем декабрь 2024 как базу)
-        # Генерируем даты в разумном диапазоне от базовой даты
-        base_date = datetime(2024, 12, 8)  # Фиксированная дата в 2024 году
-        # Заказы принимаются в обработку в течение последних 30 дней
-        days_ago = random.randint(1, 30)
-        processing_date = base_date - timedelta(days=days_ago)
-        
-        # Дата отгрузки (через 0-2 дня после обработки)
-        shipping_date = processing_date + timedelta(days=random.randint(0, 2))
-        
-        # Дата передачи в доставку (в тот же день или на следующий после отгрузки)
-        transfer_date = shipping_date + timedelta(hours=random.randint(2, 24))
-        
-        # Статус заказа
-        status = random.choices(statuses, weights=status_weights)[0]
-        
-        # Дата доставки (только для доставленных заказов)
-        if status == 'Доставлен':
-            delivery_date = transfer_date + timedelta(days=random.randint(1, 7))
-        else:
-            delivery_date = None
-        
-        # Товар и его характеристики
-        product = random.choice(products)
-        quantity = random.randint(1, 5)
-        
-        # Сумма заказа (зависит от товара)
-        base_price = random.uniform(500, 50000)
-        total_sum = base_price * quantity
-        
-        # Добавление некоторой случайности в цены
-        if 'iPhone' in product or 'Samsung Galaxy' in product:
-            total_sum = random.uniform(30000, 80000) * quantity
-        elif 'Наушники' in product or 'Часы' in product:
-            total_sum = random.uniform(5000, 25000) * quantity
-        elif 'Ноутбук' in product or 'Планшет' in product:
-            total_sum = random.uniform(20000, 100000) * quantity
-        elif 'Телевизор' in product:
-            total_sum = random.uniform(25000, 150000) * quantity
-        
-        data.append({
-            'Номер заказа': order_id,
-            'Номер отправления': shipment_id,
-            'Принят в обработку': processing_date,
-            'Дата отгрузки': shipping_date,
-            'Статус': status,
-            'Дата доставки': delivery_date,
-            'Фактическая дата передачи в доставку': transfer_date,
-            'Сумма отправления': round(total_sum, 2),
-            'Наименование товара': product,
-            'OZON id': ozon_id,
-            'Количество': quantity
-        })
-    
-    df = pd.DataFrame(data)
-    
-    # Преобразование дат в строковый формат для корректного отображения
-    date_columns = ['Принят в обработку', 'Дата отгрузки', 'Дата доставки', 'Фактическая дата передачи в доставку']
-    for col in date_columns:
-        df[col] = pd.to_datetime(df[col])
-    
-    return df
-
-def create_sample_csv(filename='sample_orders.csv', n_orders=100):
-    """Создание примера CSV файла"""
-    df = generate_mock_data(n_orders)
-    
-    # Преобразование дат в строковый формат для CSV
-    date_columns = ['Принят в обработку', 'Дата отгрузки', 'Дата доставки', 'Фактическая дата передачи в доставку']
-    for col in date_columns:
-        df[col] = df[col].dt.strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Замена NaT на пустые строки
-    df = df.fillna('')
-    
-    df.to_csv(filename, sep=';', encoding='utf-8', index=False)
-    return filename

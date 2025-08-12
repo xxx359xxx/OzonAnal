@@ -48,7 +48,8 @@ class EnhancedOrderAnalyzer:
             'Скидка руб',
             'Скидка %',
             'Объемный вес товаров, кг',
-            'Количество'
+            'Количество',
+            'Сумма отправления'
         ]
         
         for col in numeric_columns:
@@ -66,9 +67,15 @@ class EnhancedOrderAnalyzer:
         cancelled_orders = len(self.df[self.df['Статус'] == 'Отменён'])
         in_delivery = len(self.df[self.df['Статус'] == 'Доставляется'])
         
-        # Финансовые метрики
-        total_revenue = self.df['Ваша цена'].sum()
-        avg_order_value = self.df['Ваша цена'].mean()
+        # Финансовые метрики - считаем выручку только по доставленным заказам
+        delivered_df = self.df[self.df['Статус'] == 'Доставлен']
+        
+        if len(delivered_df) > 0:
+            total_revenue = delivered_df['Сумма отправления'].sum() if 'Сумма отправления' in delivered_df.columns else delivered_df['Ваша цена'].sum()
+            avg_order_value = delivered_df['Сумма отправления'].mean() if 'Сумма отправления' in delivered_df.columns else delivered_df['Ваша цена'].mean()
+        else:
+            total_revenue = 0
+            avg_order_value = 0
         total_discount_amount = self.df['Скидка руб'].sum()
         
         return {
@@ -113,18 +120,25 @@ class EnhancedOrderAnalyzer:
     
     def analyze_product_categories(self):
         """Анализ категорий товаров"""
+        # Используем только доставленные заказы для анализа товаров
+        delivered_df = self.df[self.df['Статус'] == 'Доставлен']
+        
+        if len(delivered_df) == 0:
+            return pd.DataFrame()
+        
         # Группировка по товарам
+        revenue_column = 'Сумма отправления' if 'Сумма отправления' in delivered_df.columns else 'Ваша цена'
         agg_dict = {
             'Количество': 'sum',
-            'Ваша цена': ['sum', 'mean'],
+            revenue_column: ['sum', 'mean'],
             'Скидка руб': 'sum'
         }
         
         # Добавляем вес только если колонка существует
-        if 'Объемный вес товаров, кг' in self.df.columns:
+        if 'Объемный вес товаров, кг' in delivered_df.columns:
             agg_dict['Объемный вес товаров, кг'] = 'mean'
         
-        product_stats = self.df.groupby('Наименование товара').agg(agg_dict).round(2)
+        product_stats = delivered_df.groupby('Наименование товара').agg(agg_dict).round(2)
         
         # Упрощаем названия колонок
         if 'Объемный вес товаров, кг' in self.df.columns:
@@ -245,9 +259,16 @@ class EnhancedOrderAnalyzer:
         if 'Регион доставки' not in self.df.columns:
             return {}
         
-        regional_stats = self.df.groupby('Регион доставки').agg({
+        # Используем только доставленные заказы
+        delivered_df = self.df[self.df['Статус'] == 'Доставлен']
+        
+        if len(delivered_df) == 0:
+            return {}
+        
+        revenue_column = 'Сумма отправления' if 'Сумма отправления' in delivered_df.columns else 'Ваша цена'
+        regional_stats = delivered_df.groupby('Регион доставки').agg({
             'Номер заказа': 'count',
-            'Ваша цена': ['sum', 'mean'],
+            revenue_column: ['sum', 'mean'],
             'Скидка руб': 'sum'
         }).round(2)
         
@@ -261,10 +282,17 @@ class EnhancedOrderAnalyzer:
         if 'Принят в обработку' not in self.df.columns:
             return pd.DataFrame()
         
+        # Используем только доставленные заказы
+        delivered_df = self.df[self.df['Статус'] == 'Доставлен']
+        
+        if len(delivered_df) == 0:
+            return pd.DataFrame()
+        
         # Группируем по дням
-        daily_stats = self.df.groupby(self.df['Принят в обработку'].dt.date).agg({
+        revenue_column = 'Сумма отправления' if 'Сумма отправления' in delivered_df.columns else 'Ваша цена'
+        daily_stats = delivered_df.groupby(delivered_df['Принят в обработку'].dt.date).agg({
             'Номер заказа': 'count',
-            'Ваша цена': 'sum',
+            revenue_column: 'sum',
             'Скидка руб': 'sum',
             'Количество': 'sum'
         }).round(2)
@@ -279,14 +307,21 @@ class EnhancedOrderAnalyzer:
         if 'Принят в обработку' not in self.df.columns:
             return pd.DataFrame()
         
+        # Используем только доставленные заказы
+        delivered_df = self.df[self.df['Статус'] == 'Доставлен']
+        
+        if len(delivered_df) == 0:
+            return pd.DataFrame()
+        
         # Добавляем колонку месяца
-        df_with_month = self.df.copy()
+        df_with_month = delivered_df.copy()
         df_with_month['month_year'] = df_with_month['Принят в обработку'].dt.to_period('M')
         
         # Группируем по месяцам
+        revenue_column = 'Сумма отправления' if 'Сумма отправления' in delivered_df.columns else 'Ваша цена'
         agg_dict = {
             'Номер заказа': 'count',
-            'Ваша цена': ['sum', 'mean'],
+            revenue_column: ['sum', 'mean'],
             'Скидка руб': 'sum',
             'Количество': 'sum'
         }
