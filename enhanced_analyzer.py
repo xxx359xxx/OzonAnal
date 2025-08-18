@@ -164,6 +164,200 @@ class EnhancedOrderAnalyzer:
         
         return product_stats
     
+    def analyze_product_by_sku(self):
+        """Анализ товаров по артикулам (SKU)"""
+        # Используем только доставленные заказы
+        delivered_df = self.df[self.df['Статус'] == 'Доставлен']
+        
+        if len(delivered_df) == 0 or 'Артикул' not in delivered_df.columns:
+            return pd.DataFrame()
+        
+        # Группировка по артикулам
+        revenue_column = 'Сумма отправления' if 'Сумма отправления' in delivered_df.columns else 'Ваша цена'
+        agg_dict = {
+            'Количество': 'sum',
+            revenue_column: ['sum', 'mean'],
+            'Скидка руб': 'sum',
+            'Наименование товара': 'first'  # Берем первое название товара для артикула
+        }
+        
+        # Добавляем вес если есть
+        if 'Объемный вес товаров, кг' in delivered_df.columns:
+            agg_dict['Объемный вес товаров, кг'] = 'mean'
+        
+        sku_stats = delivered_df.groupby('Артикул').agg(agg_dict).round(2)
+        
+        # Упрощаем названия колонок
+        if 'Объемный вес товаров, кг' in self.df.columns:
+            sku_stats.columns = [
+                'total_quantity',
+                'total_revenue', 
+                'avg_price',
+                'total_discount',
+                'product_name',
+                'avg_weight'
+            ]
+        else:
+            sku_stats.columns = [
+                'total_quantity',
+                'total_revenue',
+                'avg_price', 
+                'total_discount',
+                'product_name'
+            ]
+            sku_stats['avg_weight'] = pd.NA
+        
+        # Добавляем расчетные метрики
+        sku_stats['discount_rate'] = (sku_stats['total_discount'] / (sku_stats['total_revenue'] + sku_stats['total_discount']) * 100).round(2)
+        sku_stats['revenue_per_unit'] = (sku_stats['total_revenue'] / sku_stats['total_quantity']).round(2)
+        
+        # Сортируем по выручке
+        sku_stats = sku_stats.sort_values('total_revenue', ascending=False)
+        
+        return sku_stats
+    
+    def get_sku_abc_analysis(self):
+        """ABC анализ артикулов по выручке"""
+        sku_stats = self.analyze_product_by_sku()
+        
+        if len(sku_stats) == 0:
+            return {
+                'category_A': [],
+                'category_B': [],
+                'category_C': [],
+                'revenue_share_A': 0,
+                'revenue_share_B': 0,
+                'revenue_share_C': 0,
+                'cumulative_A': 0,
+                'cumulative_B': 0,
+                'cumulative_C': 100
+            }
+        
+        # Рассчитываем кумулятивную долю выручки
+        total_revenue = sku_stats['total_revenue'].sum()
+        sku_stats['revenue_share'] = (sku_stats['total_revenue'] / total_revenue * 100).round(2)
+        sku_stats['cumulative_share'] = sku_stats['revenue_share'].cumsum().round(2)
+        
+        # Классификация ABC
+        def classify_abc(cumulative_share):
+            if cumulative_share <= 80:
+                return 'A'
+            elif cumulative_share <= 95:
+                return 'B'
+            else:
+                return 'C'
+        
+        sku_stats['abc_category'] = sku_stats['cumulative_share'].apply(classify_abc)
+        
+        # Разделяем по категориям
+        category_A = sku_stats[sku_stats['abc_category'] == 'A'].index.tolist()
+        category_B = sku_stats[sku_stats['abc_category'] == 'B'].index.tolist()
+        category_C = sku_stats[sku_stats['abc_category'] == 'C'].index.tolist()
+        
+        # Рассчитываем доли выручки
+        revenue_share_A = sku_stats[sku_stats['abc_category'] == 'A']['revenue_share'].sum()
+        revenue_share_B = sku_stats[sku_stats['abc_category'] == 'B']['revenue_share'].sum()
+        revenue_share_C = sku_stats[sku_stats['abc_category'] == 'C']['revenue_share'].sum()
+        
+        # Кумулятивные доли
+        cumulative_A = revenue_share_A
+        cumulative_B = revenue_share_A + revenue_share_B
+        cumulative_C = 100.0
+        
+        return {
+            'category_A': category_A,
+            'category_B': category_B,
+            'category_C': category_C,
+            'revenue_share_A': revenue_share_A,
+            'revenue_share_B': revenue_share_B,
+            'revenue_share_C': revenue_share_C,
+            'cumulative_A': cumulative_A,
+            'cumulative_B': cumulative_B,
+            'cumulative_C': cumulative_C
+        }
+    
+    def get_sku_performance_metrics(self):
+        """Метрики эффективности артикулов"""
+        sku_stats = self.analyze_product_by_sku()
+        
+        if len(sku_stats) == 0:
+            return {
+                'total_skus': 0,
+                'total_unique_skus': 0,
+                'avg_revenue_per_sku': 0,
+                'median_revenue_per_sku': 0,
+                'avg_quantity_per_sku': 0,
+                'top_sku_by_revenue': 'N/A',
+                'top_sku_revenue': 0,
+                'top_sku_by_quantity': 'N/A',
+                'top_sku_quantity': 0,
+                'a_category_skus': 0,
+                'b_category_skus': 0,
+                'c_category_skus': 0,
+                'a_category_revenue_share': 0,
+                'top_10_percent_revenue_share': 0,
+                'gini_coefficient': 0,
+                'high_revenue_skus': 0,
+                'high_revenue_share': 0
+            }
+        
+        total_skus = len(sku_stats)
+        total_revenue = sku_stats['total_revenue'].sum()
+        total_quantity = sku_stats['total_quantity'].sum()
+        
+        # Топ артикулы
+        top_sku_by_revenue = sku_stats.head(1).index[0] if len(sku_stats) > 0 else 'N/A'
+        top_sku_revenue = sku_stats.head(1)['total_revenue'].iloc[0] if len(sku_stats) > 0 else 0
+        
+        top_sku_by_quantity = sku_stats.nlargest(1, 'total_quantity').index[0] if len(sku_stats) > 0 else 'N/A'
+        top_sku_quantity = sku_stats.nlargest(1, 'total_quantity')['total_quantity'].iloc[0] if len(sku_stats) > 0 else 0
+        
+        # ABC анализ
+        abc_analysis = self.get_sku_abc_analysis()
+        a_skus = len(abc_analysis['category_A'])
+        b_skus = len(abc_analysis['category_B'])
+        c_skus = len(abc_analysis['category_C'])
+        a_revenue_share = abc_analysis['revenue_share_A']
+        
+        # Топ-10% артикулов по выручке
+        top_10_percent_count = max(1, int(total_skus * 0.1))
+        top_10_percent_revenue = sku_stats.head(top_10_percent_count)['total_revenue'].sum()
+        top_10_percent_revenue_share = (top_10_percent_revenue / total_revenue * 100) if total_revenue > 0 else 0
+        
+        # Коэффициент Джини (концентрация выручки)
+        revenues = sku_stats['total_revenue'].values
+        revenues_sorted = np.sort(revenues)
+        n = len(revenues_sorted)
+        cumsum = np.cumsum(revenues_sorted)
+        gini_coefficient = (n + 1 - 2 * np.sum(cumsum) / cumsum[-1]) / n if cumsum[-1] > 0 else 0
+        
+        # Высокодоходные артикулы (>10k₽)
+        high_revenue_threshold = 10000
+        high_revenue_mask = sku_stats['total_revenue'] > high_revenue_threshold
+        high_revenue_skus = high_revenue_mask.sum()
+        high_revenue_total = sku_stats[high_revenue_mask]['total_revenue'].sum()
+        high_revenue_share = (high_revenue_total / total_revenue * 100) if total_revenue > 0 else 0
+        
+        return {
+            'total_skus': total_skus,
+            'total_unique_skus': total_skus,  # Добавляем для совместимости с отчетом
+            'avg_revenue_per_sku': (total_revenue / total_skus).round(2) if total_skus > 0 else 0,
+            'median_revenue_per_sku': sku_stats['total_revenue'].median() if len(sku_stats) > 0 else 0,
+            'avg_quantity_per_sku': (total_quantity / total_skus).round(2) if total_skus > 0 else 0,
+            'top_sku_by_revenue': top_sku_by_revenue,
+            'top_sku_revenue': top_sku_revenue,
+            'top_sku_by_quantity': top_sku_by_quantity,
+            'top_sku_quantity': top_sku_quantity,
+            'a_category_skus': a_skus,
+            'b_category_skus': b_skus,
+            'c_category_skus': c_skus,
+            'a_category_revenue_share': a_revenue_share,
+            'top_10_percent_revenue_share': round(top_10_percent_revenue_share, 1),
+            'gini_coefficient': round(gini_coefficient, 3),
+            'high_revenue_skus': high_revenue_skus,
+            'high_revenue_share': round(high_revenue_share, 1)
+        }
+    
     def analyze_delivery_performance(self):
         """Анализ производительности доставки"""
         delivered_orders = self.df[self.df['Статус'] == 'Доставлен'].copy()
@@ -418,11 +612,64 @@ class EnhancedOrderAnalyzer:
         
         self._fill_worksheet_data(ws_main, metrics_data, 4, header_font, header_fill, border, center_alignment)
         
-        # Лист 2: Анализ скидок
+        # Лист 2: Товарная аналитика по артикулам
+        ws_sku = wb.create_sheet("Анализ артикулов")
+        ws_sku['A1'] = "Товарная аналитика по артикулам"
+        ws_sku['A1'].font = title_font
+        
+        # Анализ товаров по артикулам
+        sku_df = self.analyze_product_by_sku()
+        sku_data = [['Артикул', 'Товар', 'Количество', 'Выручка (₽)', 'Средняя цена (₽)', 'Скидка (₽)']]
+        
+        for _, row in sku_df.head(20).iterrows():
+            sku_data.append([
+                row.name,  # Артикул (индекс)
+                row['product_name'][:30] + '...' if len(str(row['product_name'])) > 30 else row['product_name'],
+                int(row['total_quantity']),
+                f"{row['total_revenue']:.2f}",
+                f"{row['avg_price']:.2f}",
+                f"{row['total_discount']:.2f}"
+            ])
+        
+        self._fill_worksheet_data(ws_sku, sku_data, 3, header_font, header_fill, border, center_alignment)
+        
+        # ABC-анализ артикулов
+        abc_analysis = self.get_sku_abc_analysis()
+        ws_sku['A26'] = "ABC-анализ артикулов"
+        ws_sku['A26'].font = Font(bold=True, size=14)
+        
+        abc_data = [
+            ['Категория', 'Количество артикулов', 'Доля выручки (%)', 'Накопленная доля (%)'],
+            ['A (топ)', len(abc_analysis['category_A']), f"{abc_analysis['revenue_share_A']:.1f}", f"{abc_analysis['cumulative_A']:.1f}"],
+            ['B (средние)', len(abc_analysis['category_B']), f"{abc_analysis['revenue_share_B']:.1f}", f"{abc_analysis['cumulative_B']:.1f}"],
+            ['C (низкие)', len(abc_analysis['category_C']), f"{abc_analysis['revenue_share_C']:.1f}", "100.0"]
+        ]
+        
+        self._fill_worksheet_data(ws_sku, abc_data, 28, header_font, header_fill, border, center_alignment)
+        
+        # Метрики эффективности артикулов
+        performance = self.get_sku_performance_metrics()
+        ws_sku['A34'] = "Ключевые метрики артикулов"
+        ws_sku['A34'].font = Font(bold=True, size=14)
+        
+        perf_data = [
+            ['Метрика', 'Значение'],
+            ['Всего уникальных артикулов', performance['total_unique_skus']],
+            ['Средняя выручка на артикул', f"{performance['avg_revenue_per_sku']:.2f} ₽"],
+            ['Медианная выручка на артикул', f"{performance['median_revenue_per_sku']:.2f} ₽"],
+            ['Топ-10% артикулов дают выручки', f"{performance['top_10_percent_revenue_share']:.1f}%"],
+            ['Коэффициент концентрации (Джини)', f"{performance['gini_coefficient']:.3f}"],
+            ['Артикулов с выручкой > 10000₽', performance['high_revenue_skus']],
+            ['Доля высокодоходных артикулов', f"{performance['high_revenue_share']:.1f}%"]
+        ]
+        
+        self._fill_worksheet_data(ws_sku, perf_data, 36, header_font, header_fill, border, center_alignment)
+
+        # Лист 3: Анализ скидок
         ws_discounts = wb.create_sheet("Анализ скидок")
         ws_discounts['A1'] = "Анализ скидок и акций"
         ws_discounts['A1'].font = title_font
-        
+
         discount_analysis = self.analyze_discounts()
         discount_data = [
             ['Метрика', 'Значение'],
